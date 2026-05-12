@@ -62,6 +62,7 @@ function startStreaming(ws) {
     ffmpegStreaming = spawn('ffmpeg', [
         '-analyzeduration', '5000000',
         '-probesize', '5000000',
+        '-fflags', '+genpts+igndts', // Generate missing PTS and ignore invalid DTS
         '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=1000000&buffer_size=1000000`,
         '-c', 'copy',
         '-f', 'mp4',

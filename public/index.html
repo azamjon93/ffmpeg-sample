@@ -88,7 +88,16 @@
 
         ws.onmessage = (event) => {
             if (sourceBuffer && !sourceBuffer.updating) {
-                sourceBuffer.appendBuffer(event.data);
+                try {
+                    sourceBuffer.appendBuffer(event.data);
+                } catch (e) {
+                    console.error('SourceBuffer append error:', e);
+                    if (e.name === 'QuotaExceededError') {
+                        // Clear buffer if full
+                        const end = sourceBuffer.buffered.end(0);
+                        sourceBuffer.remove(0, end - 5); 
+                    }
+                }
             } else {
                 queue.push(event.data);
             }
