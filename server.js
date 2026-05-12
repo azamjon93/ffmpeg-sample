@@ -55,16 +55,15 @@ function startStreaming(ws) {
 
     console.log(`Starting FFmpeg High-Quality Pass-through on port ${UDP_PORT}`);
 
-    // Switched to '-c copy' (Pass-through). 
-    // This preserves the exact quality sent from Windows and uses almost 0% CPU.
-    // We use '-vbsf h264_mp4toannexb' to ensure the bitstream is compatible with MPEG-TS.
+    // Increased probesize to 5MB to ensure it catches the 720p headers
+    // Added discardcorrupt to prevent broken frames from hitting mpegts.js
     ffmpegStreaming = spawn('ffmpeg', [
-        '-fflags', 'nobuffer',
+        '-fflags', 'nobuffer+discardcorrupt',
         '-flags', 'low_delay',
-        '-analyzeduration', '2000000',
-        '-probesize', '2000000',
+        '-analyzeduration', '5000000',
+        '-probesize', '5000000',
         '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=5000000&buffer_size=5000000`,
-        '-c', 'copy',         // No transcoding = Original Quality + 0% CPU
+        '-c', 'copy',
         '-f', 'mpegts',
         '-flush_packets', '1',
         'pipe:1'
