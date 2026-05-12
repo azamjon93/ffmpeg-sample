@@ -57,8 +57,12 @@ function startStreaming(ws) {
     // -c copy : Copy codecs (no transcoding for low latency)
     // -f mp4 : Output format MP4
     // -movflags frag_keyframe+empty_moov+default_base_moof : Create fragmented MP4 for MSE
+    // Increased probesize and analyzeduration to help FFmpeg detect stream parameters in unreliable UDP
+    // Added fifo_size and buffer_size to UDP input to prevent packet loss
     ffmpegStreaming = spawn('ffmpeg', [
-        '-i', `udp://0.0.0.0:${UDP_PORT}`,
+        '-analyzeduration', '5000000',
+        '-probesize', '5000000',
+        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=1000000&buffer_size=1000000`,
         '-c', 'copy',
         '-f', 'mp4',
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
