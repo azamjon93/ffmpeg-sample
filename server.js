@@ -63,6 +63,9 @@ function startStreaming(ws) {
 
     // Switching to MPEG-TS output (-f mpegts)
     // MPEG-TS is much more resilient to corruption than MP4
+    // Scale to 480p for real-time speed (>1.0x) on low-spec servers
+    // Increase keyframe frequency (-g 15) to help recovery from corruption
+    // Use CRF 20 to maintain quality even with dirty input
     ffmpegStreaming = spawn('ffmpeg', [
         '-analyzeduration', '10000000',
         '-probesize', '10000000',
@@ -71,15 +74,13 @@ function startStreaming(ws) {
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
-        '-vf', 'scale=-1:720', 
-        '-b:v', '2000k',       
-        '-maxrate', '2000k',
-        '-bufsize', '4000k',
-        '-profile:v', 'baseline', 
+        '-vf', 'scale=-1:480', 
+        '-crf', '20',         // Constant Rate Factor (lower = better quality, 20-23 is good)
+        '-g', '15',           // Keyframe every 15 frames (0.5s) for fast recovery
         '-pix_fmt', 'yuv420p',
-        '-g', '30', 
+        '-threads', '0',      // Use all available CPU cores
         '-c:a', 'aac',
-        '-f', 'mpegts', // Raw MPEG-TS stream
+        '-f', 'mpegts',
         'pipe:1'
     ]);
 
