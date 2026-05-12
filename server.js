@@ -61,26 +61,25 @@ function startStreaming(ws) {
 
     console.log(`Starting FFmpeg MPEG-TS transcode on port ${UDP_PORT}`);
 
-    // Dropped to 360p to ensure speed > 1.0x on the server
-    // Forced 4Mbps bitrate to prevent quality drops due to corruption
-    // Added -err_detect ignore_err to keep moving despite UDP drops
+    // Reduced buffer sizes to 2MB to prevent 'Cannot allocate memory' errors
+    // while still providing protection against packet loss.
     ffmpegStreaming = spawn('ffmpeg', [
         '-analyzeduration', '10000000',
         '-probesize', '10000000',
         '-fflags', '+genpts+igndts',
         '-err_detect', 'ignore_err',
-        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=20000000&buffer_size=20000000`,
+        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=2000000&buffer_size=2000000`,
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
-        '-vf', 'scale=trunc(oh*a/2)*2:360', // Scale to 360p height
-        '-b:v', '4000k',       // Force 4Mbps bitrate
+        '-vf', 'scale=trunc(oh*a/2)*2:360', 
+        '-b:v', '4000k',       
         '-minrate', '4000k',
         '-maxrate', '4000k',
         '-bufsize', '8000k',
-        '-g', '15',           // Keyframe every 15 frames for fast recovery
+        '-g', '15',           
         '-pix_fmt', 'yuv420p',
-        '-threads', '0',      // Use all available CPU cores
+        '-threads', '0',      
         '-c:a', 'aac',
         '-f', 'mpegts',
         'pipe:1'
