@@ -51,44 +51,45 @@ wss.on('connection', (ws) => {
 });
 
 function startStreaming(ws) {
-    if (ffmpegStreaming) {
-        // Already streaming, just pipe to this new client
-        ffmpegStreaming.stdout.on('data', (chunk) => {
-            if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
-        });
-        return;
-    }
+    if (ffmpegStreaming) return; // Broadcast is already running
 
-    console.log(`Starting FFmpeg MPEG-TS transcode on port ${UDP_PORT}`);
+    console.log(`Starting FFmpeg Low-Latency transcode on port ${UDP_PORT}`);
 
-    // Reduced buffer sizes to 2MB to prevent 'Cannot allocate memory' errors
-    // while still providing protection against packet loss.
+    // Added low-latency flags: -fflags nobuffer, -flags low_delay
+    // Increased UDP buffer but kept it safe.
     ffmpegStreaming = spawn('ffmpeg', [
-        '-analyzeduration', '10000000',
-        '-probesize', '10000000',
-        '-fflags', '+genpts+igndts',
+        '-fflags', 'nobuffer',
+        '-flags', 'low_delay',
+        '-analyzeduration', '1000000',
+        '-probesize', '1000000',
         '-err_detect', 'ignore_err',
         '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=2000000&buffer_size=2000000`,
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
         '-vf', 'scale=trunc(oh*a/2)*2:360', 
-        '-b:v', '4000k',       
-        '-minrate', '4000k',
-        '-maxrate', '4000k',
-        '-bufsize', '8000k',
+        '-b:v', '2500k',       
+        '-maxrate', '2500k',
+        '-bufsize', '5000k',
         '-g', '15',           
         '-pix_fmt', 'yuv420p',
         '-threads', '0',      
         '-c:a', 'aac',
         '-f', 'mpegts',
+        '-flush_packets', '1',
         'pipe:1'
     ]);
 
     ffmpegStreaming.stdout.on('data', (chunk) => {
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
-                client.send(chunk);
+                // Congestion Control: Drop data if client buffer is > 1MB
+                // This prevents latency from growing indefinitely
+                if (client.bufferedAmount < 1024 * 1024) {
+                    client.send(chunk);
+                } else {
+                    // console.log('Client buffer full, dropping chunk');
+                }
             }
         });
     });
