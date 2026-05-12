@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FFmpeg UDP Stream Listener</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; margin-top: 50px; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 800px; }
+        video { width: 100%; background: #000; border-radius: 4px; }
+        .controls { margin-top: 20px; display: flex; gap: 10px; justify-content: center; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .status { margin-top: 10px; font-size: 0.9em; color: #666; }
+        .status span { font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>FFmpeg UDP Stream Listener</h1>
+    <video id="videoPlayer" controls autoplay muted></video>
+
+    <div class="controls">
+        <button id="btnConnect" class="btn-primary">Connect Stream</button>
+        <button id="btnRecord" class="btn-success" disabled>Start Recording</button>
+        <button id="btnStopRecord" class="btn-danger" disabled>Stop Recording</button>
+    </div>
+
+    <div class="status">
+        Status: <span id="streamStatus">Disconnected</span> | 
+        Recording: <span id="recordStatus">Idle</span>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('videoPlayer');
+    const btnConnect = document.getElementById('btnConnect');
+    const btnRecord = document.getElementById('btnRecord');
+    const btnStopRecord = document.getElementById('btnStopRecord');
+    const streamStatus = document.getElementById('streamStatus');
+    const recordStatus = document.getElementById('recordStatus');
+
+    let ws = null;
+    let mediaSource = null;
+    let sourceBuffer = null;
+    let queue = [];
+
+    btnConnect.onclick = () => {
+        if (ws) {
+            ws.close();
+            return;
+        }
+
+        ws = new WebSocket(`ws://${window.location.host}`);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+            streamStatus.innerText = 'Connected';
+            btnConnect.innerText = 'Disconnect';
+            btnRecord.disabled = false;
+            
+            // Initialize MSE
+            mediaSource = new MediaSource();
+            video.src = URL.createObjectURL(mediaSource);
+            
+            mediaSource.addEventListener('sourceopen', () => {
+                // Codec needs to match what FFmpeg sends. 
+                // 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"' is common for h264/aac
+                // But since we are copying, it depends on the source.
+                // We'll use a generic H264 codec string.
+                sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E, mp4a.40.2"');
+                
+                sourceBuffer.addEventListener('updateend', () => {
+                    if (queue.length > 0 && !sourceBuffer.updating) {
+                        sourceBuffer.appendBuffer(queue.shift());
+                    }
+                });
+
+                // Signal server to start streaming
+                ws.send(JSON.stringify({ type: 'START_STREAM' }));
+            });
+        };
+
+        ws.onmessage = (event) => {
+            if (sourceBuffer && !sourceBuffer.updating) {
+                sourceBuffer.appendBuffer(event.data);
+            } else {
+                queue.push(event.data);
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket closed');
+            streamStatus.innerText = 'Disconnected';
+            btnConnect.innerText = 'Connect Stream';
+            btnRecord.disabled = true;
+            btnStopRecord.disabled = true;
+            ws = null;
+        };
+    };
+
+    btnRecord.onclick = () => {
+        ws.send(JSON.stringify({ type: 'START_RECORD' }));
+        recordStatus.innerText = 'Recording...';
+        btnRecord.disabled = true;
+        btnStopRecord.disabled = false;
+    };
+
+    btnStopRecord.onclick = () => {
+        ws.send(JSON.stringify({ type: 'STOP_RECORD' }));
+        recordStatus.innerText = 'Idle';
+        btnRecord.disabled = false;
+        btnStopRecord.disabled = true;
+    };
+</script>
+
+</body>
+</html>
