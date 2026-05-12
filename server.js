@@ -74,11 +74,11 @@ function startStreaming(ws) {
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
-        '-vf', 'scale=-1:480', 
-        '-crf', '20',         // Constant Rate Factor (lower = better quality, 20-23 is good)
-        '-g', '15',           // Keyframe every 15 frames (0.5s) for fast recovery
+        '-vf', 'scale=trunc(oh*a/2)*2:480', // Force width to be divisible by 2 for H.264 encoder
+        '-crf', '20',         
+        '-g', '15',           
         '-pix_fmt', 'yuv420p',
-        '-threads', '0',      // Use all available CPU cores
+        '-threads', '0',      
         '-c:a', 'aac',
         '-f', 'mpegts',
         'pipe:1'

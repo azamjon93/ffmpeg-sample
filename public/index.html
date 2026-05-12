@@ -46,6 +46,7 @@
     const recordStatus = document.getElementById('recordStatus');
 
     let player = null;
+    let connectTimeout = null;
 
     btnConnect.onclick = () => {
         if (player) {
@@ -56,7 +57,13 @@
         console.log('Connecting to MPEG-TS stream...');
         streamStatus.innerText = 'Connecting...';
         
-        // mpegts.js handles the WebSocket connection and decoding of the TS stream
+        // Auto-recovery: If we don't get data in 5 seconds, restart
+        connectTimeout = setTimeout(() => {
+            console.warn('Connection timed out, retrying...');
+            stopAll();
+            btnConnect.click();
+        }, 8000);
+
         player = mpegts.createPlayer({
             type: 'mse',
             isLive: true,
@@ -64,7 +71,7 @@
             hasAudio: true,
             hasVideo: true
         }, {
-            enableStashBuffer: false, // Minimize latency
+            enableStashBuffer: false,
             liveBufferLatencyChasing: true
         });
 
@@ -74,9 +81,14 @@
 
         player.on(mpegts.Events.ERROR, (type, detail, info) => {
             console.error('Player error:', type, detail, info);
+            stopAll();
         });
 
         player.on(mpegts.Events.STATISTICS_INFO, (stats) => {
+            if (connectTimeout) {
+                clearTimeout(connectTimeout);
+                connectTimeout = null;
+            }
             streamStatus.innerText = 'Connected (' + Math.floor(stats.speed / 1024) + ' KB/s)';
         });
 
@@ -85,6 +97,10 @@
     };
 
     function stopAll() {
+        if (connectTimeout) {
+            clearTimeout(connectTimeout);
+            connectTimeout = null;
+        }
         if (player) {
             player.pause();
             player.unload();
