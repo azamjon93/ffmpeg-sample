@@ -73,7 +73,7 @@ function startStreaming(ws) {
 
     ffmpegStreaming.stderr.on('data', (data) => {
         // Log FFmpeg errors/info
-        // console.log(`FFmpeg Streaming: ${data}`);
+        console.log(`FFmpeg Streaming: ${data}`);
     });
 
     ffmpegStreaming.on('close', (code) => {
