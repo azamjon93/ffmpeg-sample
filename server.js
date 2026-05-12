@@ -57,14 +57,19 @@ function startStreaming(ws) {
     // -c copy : Copy codecs (no transcoding for low latency)
     // -f mp4 : Output format MP4
     // -movflags frag_keyframe+empty_moov+default_base_moof : Create fragmented MP4 for MSE
-    // Increased probesize and analyzeduration to help FFmpeg detect stream parameters in unreliable UDP
-    // Added fifo_size and buffer_size to UDP input to prevent packet loss
+    // Switched to transcoding (-c:v libx264) because the input UDP stream is too corrupted for direct copying.
+    // Transcoding allows FFmpeg to reconstruct the frames and correctly identify dimensions.
     ffmpegStreaming = spawn('ffmpeg', [
-        '-analyzeduration', '5000000',
-        '-probesize', '5000000',
-        '-fflags', '+genpts+igndts', // Generate missing PTS and ignore invalid DTS
-        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=1000000&buffer_size=1000000`,
-        '-c', 'copy',
+        '-analyzeduration', '10000000',
+        '-probesize', '10000000',
+        '-fflags', '+genpts+igndts',
+        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=10000000&buffer_size=10000000`,
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-pix_fmt', 'yuv420p',
+        '-g', '30', // Force keyframe every 30 frames for faster MSE sync
+        '-c:a', 'aac',
         '-f', 'mp4',
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
         'pipe:1'
