@@ -13,52 +13,56 @@ const PORT = process.env.PORT || 3000;
 const UDP_PORT = 9999;
 const RECORD_DIR = path.join(__dirname, 'recordings');
 
-// Ensure recordings directory exists
 if (!fs.existsSync(RECORD_DIR)) {
     fs.mkdirSync(RECORD_DIR);
 }
 
 app.use(express.static('public'));
 
+// Command endpoints for recording
+app.get('/record/start', (req, res) => {
+    startRecording();
+    res.sendStatus(200);
+});
+
+app.get('/record/stop', (req, res) => {
+    stopRecording();
+    res.sendStatus(200);
+});
+
 let ffmpegStreaming = null;
 let ffmpegRecording = null;
+let activeClients = 0;
 
 wss.on('connection', (ws) => {
     console.log('Client connected');
+    activeClients++;
 
-    ws.on('message', (message) => {
-        const data = JSON.parse(message);
-
-        if (data.type === 'START_STREAM') {
-            startStreaming(ws);
-        } else if (data.type === 'STOP_STREAM') {
-            stopStreaming();
-        } else if (data.type === 'START_RECORD') {
-            startRecording();
-        } else if (data.type === 'STOP_RECORD') {
-            stopRecording();
-        }
-    });
+    // For mpegts.js, we start streaming immediately on connection
+    startStreaming(ws);
 
     ws.on('close', () => {
         console.log('Client disconnected');
-        stopStreaming();
-        stopRecording();
+        activeClients--;
+        if (activeClients === 0) {
+            stopStreaming();
+        }
     });
 });
 
 function startStreaming(ws) {
-    if (ffmpegStreaming) return;
+    if (ffmpegStreaming) {
+        // Already streaming, just pipe to this new client
+        ffmpegStreaming.stdout.on('data', (chunk) => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
+        });
+        return;
+    }
 
-    console.log(`Starting FFmpeg UDP listener on port ${UDP_PORT}`);
+    console.log(`Starting FFmpeg MPEG-TS transcode on port ${UDP_PORT}`);
 
-    // FFmpeg command to receive UDP and output fragmented MP4 to stdout
-    // -i udp://0.0.0.0:9999 : Listen for UDP on all interfaces
-    // -c copy : Copy codecs (no transcoding for low latency)
-    // -f mp4 : Output format MP4
-    // -movflags frag_keyframe+empty_moov+default_base_moof : Create fragmented MP4 for MSE
-    // Added scaling (-vf scale) and bitrate capping (-b:v) to ensure the server can keep up.
-    // The previous logs showed 0.52x speed, which causes lag/failure.
+    // Switching to MPEG-TS output (-f mpegts)
+    // MPEG-TS is much more resilient to corruption than MP4
     ffmpegStreaming = spawn('ffmpeg', [
         '-analyzeduration', '10000000',
         '-probesize', '10000000',
@@ -67,33 +71,32 @@ function startStreaming(ws) {
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
-        '-vf', 'scale=-1:720', // Scale to 720p height to reduce CPU load
-        '-b:v', '2500k',       // Cap bitrate at 2.5Mbps
-        '-maxrate', '2500k',
-        '-bufsize', '5000k',
+        '-vf', 'scale=-1:720', 
+        '-b:v', '2000k',       
+        '-maxrate', '2000k',
+        '-bufsize', '4000k',
         '-profile:v', 'baseline', 
-        '-level', '3.1',
         '-pix_fmt', 'yuv420p',
         '-g', '30', 
         '-c:a', 'aac',
-        '-f', 'mp4',
-        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        '-f', 'mpegts', // Raw MPEG-TS stream
         'pipe:1'
     ]);
 
     ffmpegStreaming.stdout.on('data', (chunk) => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(chunk);
-        }
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(chunk);
+            }
+        });
     });
 
     ffmpegStreaming.stderr.on('data', (data) => {
-        // Log FFmpeg errors/info
-        console.log(`FFmpeg Streaming: ${data}`);
+        console.log(`FFmpeg: ${data}`);
     });
 
     ffmpegStreaming.on('close', (code) => {
-        console.log(`FFmpeg Streaming process exited with code ${code}`);
+        console.log(`FFmpeg process exited with code ${code}`);
         ffmpegStreaming = null;
     });
 }
@@ -107,27 +110,13 @@ function stopStreaming() {
 
 function startRecording() {
     if (ffmpegRecording) return;
-
-    const fileName = `record_${Date.now()}.mp4`;
-    const filePath = path.join(RECORD_DIR, fileName);
-
-    console.log(`Starting recording to ${filePath}`);
-
-    // Spawn a separate FFmpeg process to record the same UDP stream
-    // Using -i udp://0.0.0.0:9999 again (FFmpeg can share the socket if needed, 
-    // but usually only one process can bind to a port unless SO_REUSEPORT is used).
-    // Note: For production, we'd use a single FFmpeg with 'tee' muxer.
-    // For this POC, we'll try to re-read or use a different approach if port is locked.
+    const filePath = path.join(RECORD_DIR, `record_${Date.now()}.mp4`);
+    console.log(`Recording to ${filePath}`);
     ffmpegRecording = spawn('ffmpeg', [
         '-i', `udp://0.0.0.0:${UDP_PORT}?reuse=1`,
         '-c', 'copy',
         filePath
     ]);
-
-    ffmpegRecording.on('close', (code) => {
-        console.log(`FFmpeg Recording process exited with code ${code}`);
-        ffmpegRecording = null;
-    });
 }
 
 function stopRecording() {
@@ -138,6 +127,7 @@ function stopRecording() {
 }
 
 server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
-    console.log(`Listening for UDP streams on port ${UDP_PORT}`);
+    console.log(`Server: http://localhost:${PORT}`);
+    console.log(`UDP: ${UDP_PORT}`);
+    console.log('TIP: If you still see Packet Corrupt, run: sudo sysctl -w net.core.rmem_max=26214400');
 });

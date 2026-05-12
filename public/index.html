@@ -36,6 +36,7 @@
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
 <script>
     const video = document.getElementById('videoPlayer');
     const btnConnect = document.getElementById('btnConnect');
@@ -44,92 +45,53 @@
     const streamStatus = document.getElementById('streamStatus');
     const recordStatus = document.getElementById('recordStatus');
 
-    let ws = null;
-    let mediaSource = null;
-    let sourceBuffer = null;
-    let queue = [];
+    let player = null;
 
     btnConnect.onclick = () => {
-        if (ws) {
+        if (player) {
             stopAll();
             return;
         }
 
-        ws = new WebSocket(`ws://${window.location.host}`);
-        ws.binaryType = 'arraybuffer';
+        console.log('Connecting to MPEG-TS stream...');
+        streamStatus.innerText = 'Connecting...';
+        
+        // mpegts.js handles the WebSocket connection and decoding of the TS stream
+        player = mpegts.createPlayer({
+            type: 'mse',
+            isLive: true,
+            url: `ws://${window.location.host}`,
+            hasAudio: true,
+            hasVideo: true
+        }, {
+            enableStashBuffer: false, // Minimize latency
+            liveBufferLatencyChasing: true
+        });
 
-        ws.onopen = () => {
-            console.log('WebSocket connected');
-            streamStatus.innerText = 'Connected';
-            btnConnect.innerText = 'Disconnect';
-            btnRecord.disabled = false;
-            
-            // Initialize MSE
-            mediaSource = new MediaSource();
-            video.src = URL.createObjectURL(mediaSource);
-            
-            mediaSource.addEventListener('sourceopen', () => {
-                console.log('MediaSource opened');
-                if (mediaSource.sourceBuffers.length > 0) return;
+        player.attachMediaElement(video);
+        player.load();
+        player.play();
 
-                // Updated to Baseline 3.1 to match server transcode
-                sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01F, mp4a.40.2"');
-                
-                sourceBuffer.addEventListener('updateend', () => {
-                    if (queue.length > 0 && !sourceBuffer.updating && mediaSource.readyState === 'open') {
-                        sourceBuffer.appendBuffer(queue.shift());
-                    }
-                    
-                    // Keep only 10 seconds of buffer to reduce latency and memory
-                    if (sourceBuffer.buffered.length > 0) {
-                        const start = sourceBuffer.buffered.start(0);
-                        const end = sourceBuffer.buffered.end(0);
-                        if (end - start > 10) {
-                            sourceBuffer.remove(0, end - 5);
-                        }
-                    }
-                });
+        player.on(mpegts.Events.ERROR, (type, detail, info) => {
+            console.error('Player error:', type, detail, info);
+        });
 
-                sourceBuffer.addEventListener('error', (e) => console.error('SourceBuffer error:', e));
+        player.on(mpegts.Events.STATISTICS_INFO, (stats) => {
+            streamStatus.innerText = 'Connected (' + Math.floor(stats.speed / 1024) + ' KB/s)';
+        });
 
-                // Signal server to start streaming
-                ws.send(JSON.stringify({ type: 'START_STREAM' }));
-            });
-
-            mediaSource.addEventListener('sourceclose', () => console.log('MediaSource closed'));
-        };
-
-        ws.onmessage = (event) => {
-            if (sourceBuffer && !sourceBuffer.updating && mediaSource.readyState === 'open') {
-                try {
-                    sourceBuffer.appendBuffer(event.data);
-                } catch (e) {
-                    console.error('SourceBuffer append error:', e);
-                }
-            } else if (mediaSource && mediaSource.readyState === 'open') {
-                queue.push(event.data);
-            }
-        };
-
-        ws.onclose = () => {
-            console.log('WebSocket closed');
-            stopAll();
-        };
+        btnConnect.innerText = 'Disconnect';
+        btnRecord.disabled = false;
     };
 
     function stopAll() {
-        if (ws) {
-            ws.close();
-            ws = null;
+        if (player) {
+            player.pause();
+            player.unload();
+            player.detachMediaElement();
+            player.destroy();
+            player = null;
         }
-        if (mediaSource) {
-            if (mediaSource.readyState === 'open') {
-                mediaSource.endOfStream();
-            }
-            mediaSource = null;
-            sourceBuffer = null;
-        }
-        queue = [];
         streamStatus.innerText = 'Disconnected';
         btnConnect.innerText = 'Connect Stream';
         btnRecord.disabled = true;
@@ -138,17 +100,23 @@
     }
 
     btnRecord.onclick = () => {
-        ws.send(JSON.stringify({ type: 'START_RECORD' }));
-        recordStatus.innerText = 'Recording...';
-        btnRecord.disabled = true;
-        btnStopRecord.disabled = false;
+        // Since we are using mpegts.js, we need a way to tell the server to start recording.
+        // We'll open a small secondary command socket or just use the player's internal transport if exposed.
+        // For simplicity in this POC, we'll fetch a trigger URL or use a simple WS message if mpegts.js allows.
+        // mpegts.js doesn't easily expose the raw WS, so we'll use a fetch for the command.
+        fetch('/record/start').then(() => {
+            recordStatus.innerText = 'Recording...';
+            btnRecord.disabled = true;
+            btnStopRecord.disabled = false;
+        });
     };
 
     btnStopRecord.onclick = () => {
-        ws.send(JSON.stringify({ type: 'STOP_RECORD' }));
-        recordStatus.innerText = 'Idle';
-        btnRecord.disabled = false;
-        btnStopRecord.disabled = true;
+        fetch('/record/stop').then(() => {
+            recordStatus.innerText = 'Idle';
+            btnRecord.disabled = false;
+            btnStopRecord.disabled = true;
+        });
     };
 </script>
 
