@@ -53,18 +53,20 @@ wss.on('connection', (ws) => {
 function startStreaming(ws) {
     if (ffmpegStreaming) return;
 
-    console.log(`Starting FFmpeg High-Quality Pass-through on port ${UDP_PORT}`);
+    console.log(`Starting FFmpeg High-Resilience Pass-through on port ${UDP_PORT}`);
 
-    // Increased probesize to 5MB to ensure it catches the 720p headers
-    // Added discardcorrupt to prevent broken frames from hitting mpegts.js
+    // Removed 'discardcorrupt' so the browser handles the "dirty" data instead of FFmpeg dropping it all.
+    // Added '-overrun_nonfatal 1' to prevent FFmpeg from crashing when UDP buffers overflow.
     ffmpegStreaming = spawn('ffmpeg', [
-        '-fflags', 'nobuffer+discardcorrupt',
+        '-fflags', 'nobuffer',
         '-flags', 'low_delay',
-        '-analyzeduration', '5000000',
-        '-probesize', '5000000',
-        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=5000000&buffer_size=5000000`,
+        '-overrun_nonfatal', '1',
+        '-analyzeduration', '2000000',
+        '-probesize', '2000000',
+        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=10000000&buffer_size=10000000`,
         '-c', 'copy',
         '-f', 'mpegts',
+        '-fflags', '+genpts+igndts', // Fix timestamps for the browser
         '-flush_packets', '1',
         'pipe:1'
     ]);
