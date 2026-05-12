@@ -51,30 +51,20 @@ wss.on('connection', (ws) => {
 });
 
 function startStreaming(ws) {
-    if (ffmpegStreaming) return; // Broadcast is already running
+    if (ffmpegStreaming) return;
 
-    console.log(`Starting FFmpeg Low-Latency transcode on port ${UDP_PORT}`);
+    console.log(`Starting FFmpeg High-Quality Pass-through on port ${UDP_PORT}`);
 
-    // Added low-latency flags: -fflags nobuffer, -flags low_delay
-    // Increased UDP buffer but kept it safe.
+    // Switched to '-c copy' (Pass-through). 
+    // This preserves the exact quality sent from Windows and uses almost 0% CPU.
+    // We use '-vbsf h264_mp4toannexb' to ensure the bitstream is compatible with MPEG-TS.
     ffmpegStreaming = spawn('ffmpeg', [
         '-fflags', 'nobuffer',
         '-flags', 'low_delay',
-        '-analyzeduration', '1000000',
-        '-probesize', '1000000',
-        '-err_detect', 'ignore_err',
-        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=2000000&buffer_size=2000000`,
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-tune', 'zerolatency',
-        '-vf', 'scale=trunc(oh*a/2)*2:360', 
-        '-b:v', '2500k',       
-        '-maxrate', '2500k',
-        '-bufsize', '5000k',
-        '-g', '15',           
-        '-pix_fmt', 'yuv420p',
-        '-threads', '0',      
-        '-c:a', 'aac',
+        '-analyzeduration', '2000000',
+        '-probesize', '2000000',
+        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=5000000&buffer_size=5000000`,
+        '-c', 'copy',         // No transcoding = Original Quality + 0% CPU
         '-f', 'mpegts',
         '-flush_packets', '1',
         'pipe:1'
