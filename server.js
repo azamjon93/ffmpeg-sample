@@ -53,20 +53,18 @@ wss.on('connection', (ws) => {
 function startStreaming(ws) {
     if (ffmpegStreaming) return;
 
-    console.log(`Starting FFmpeg High-Resilience Pass-through on port ${UDP_PORT}`);
+    console.log(`Starting FFmpeg High-Quality TCP Listener on port ${UDP_PORT}`);
 
-    // Removed 'discardcorrupt' so the browser handles the "dirty" data instead of FFmpeg dropping it all.
-    // Added '-overrun_nonfatal 1' to prevent FFmpeg from crashing when UDP buffers overflow.
+    // Switched from UDP to TCP to guarantee quality.
+    // TCP handles retransmissions, so "Packet Corrupt" errors will disappear.
+    // FFmpeg will listen on TCP 9999 and wait for your Windows app to connect.
     ffmpegStreaming = spawn('ffmpeg', [
         '-fflags', 'nobuffer',
         '-flags', 'low_delay',
-        '-overrun_nonfatal', '1',
-        '-analyzeduration', '2000000',
-        '-probesize', '2000000',
-        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=10000000&buffer_size=10000000`,
+        '-i', `tcp://0.0.0.0:${UDP_PORT}?listen`, // Listen for incoming TCP connection
         '-c', 'copy',
         '-f', 'mpegts',
-        '-fflags', '+genpts+igndts', // Fix timestamps for the browser
+        '-fflags', '+genpts+igndts',
         '-flush_packets', '1',
         'pipe:1'
     ]);
