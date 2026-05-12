@@ -51,7 +51,7 @@
 
     btnConnect.onclick = () => {
         if (ws) {
-            ws.close();
+            stopAll();
             return;
         }
 
@@ -69,49 +69,63 @@
             video.src = URL.createObjectURL(mediaSource);
             
             mediaSource.addEventListener('sourceopen', () => {
-                // Codec needs to match what FFmpeg sends. 
-                // 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"' is common for h264/aac
-                // But since we are copying, it depends on the source.
-                // We'll use a generic H264 codec string.
+                console.log('MediaSource opened');
+                if (mediaSource.sourceBuffers.length > 0) return;
+
                 sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E, mp4a.40.2"');
                 
                 sourceBuffer.addEventListener('updateend', () => {
-                    if (queue.length > 0 && !sourceBuffer.updating) {
+                    if (queue.length > 0 && !sourceBuffer.updating && mediaSource.readyState === 'open') {
                         sourceBuffer.appendBuffer(queue.shift());
                     }
                 });
 
+                sourceBuffer.addEventListener('error', (e) => console.error('SourceBuffer error:', e));
+
                 // Signal server to start streaming
                 ws.send(JSON.stringify({ type: 'START_STREAM' }));
             });
+
+            mediaSource.addEventListener('sourceclose', () => console.log('MediaSource closed'));
         };
 
         ws.onmessage = (event) => {
-            if (sourceBuffer && !sourceBuffer.updating) {
+            if (sourceBuffer && !sourceBuffer.updating && mediaSource.readyState === 'open') {
                 try {
                     sourceBuffer.appendBuffer(event.data);
                 } catch (e) {
                     console.error('SourceBuffer append error:', e);
-                    if (e.name === 'QuotaExceededError') {
-                        // Clear buffer if full
-                        const end = sourceBuffer.buffered.end(0);
-                        sourceBuffer.remove(0, end - 5); 
-                    }
                 }
-            } else {
+            } else if (mediaSource && mediaSource.readyState === 'open') {
                 queue.push(event.data);
             }
         };
 
         ws.onclose = () => {
             console.log('WebSocket closed');
-            streamStatus.innerText = 'Disconnected';
-            btnConnect.innerText = 'Connect Stream';
-            btnRecord.disabled = true;
-            btnStopRecord.disabled = true;
-            ws = null;
+            stopAll();
         };
     };
+
+    function stopAll() {
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        if (mediaSource) {
+            if (mediaSource.readyState === 'open') {
+                mediaSource.endOfStream();
+            }
+            mediaSource = null;
+            sourceBuffer = null;
+        }
+        queue = [];
+        streamStatus.innerText = 'Disconnected';
+        btnConnect.innerText = 'Connect Stream';
+        btnRecord.disabled = true;
+        btnStopRecord.disabled = true;
+        recordStatus.innerText = 'Idle';
+    }
 
     btnRecord.onclick = () => {
         ws.send(JSON.stringify({ type: 'START_RECORD' }));
