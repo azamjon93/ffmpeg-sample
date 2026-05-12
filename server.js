@@ -57,8 +57,8 @@ function startStreaming(ws) {
     // -c copy : Copy codecs (no transcoding for low latency)
     // -f mp4 : Output format MP4
     // -movflags frag_keyframe+empty_moov+default_base_moof : Create fragmented MP4 for MSE
-    // Switched to transcoding (-c:v libx264) because the input UDP stream is too corrupted for direct copying.
-    // Transcoding allows FFmpeg to reconstruct the frames and correctly identify dimensions.
+    // Added scaling (-vf scale) and bitrate capping (-b:v) to ensure the server can keep up.
+    // The previous logs showed 0.52x speed, which causes lag/failure.
     ffmpegStreaming = spawn('ffmpeg', [
         '-analyzeduration', '10000000',
         '-probesize', '10000000',
@@ -67,8 +67,14 @@ function startStreaming(ws) {
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
+        '-vf', 'scale=-1:720', // Scale to 720p height to reduce CPU load
+        '-b:v', '2500k',       // Cap bitrate at 2.5Mbps
+        '-maxrate', '2500k',
+        '-bufsize', '5000k',
+        '-profile:v', 'baseline', 
+        '-level', '3.1',
         '-pix_fmt', 'yuv420p',
-        '-g', '30', // Force keyframe every 30 frames for faster MSE sync
+        '-g', '30', 
         '-c:a', 'aac',
         '-f', 'mp4',
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',

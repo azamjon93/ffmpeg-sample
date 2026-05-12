@@ -72,11 +72,21 @@
                 console.log('MediaSource opened');
                 if (mediaSource.sourceBuffers.length > 0) return;
 
-                sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E, mp4a.40.2"');
+                // Updated to Baseline 3.1 to match server transcode
+                sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01F, mp4a.40.2"');
                 
                 sourceBuffer.addEventListener('updateend', () => {
                     if (queue.length > 0 && !sourceBuffer.updating && mediaSource.readyState === 'open') {
                         sourceBuffer.appendBuffer(queue.shift());
+                    }
+                    
+                    // Keep only 10 seconds of buffer to reduce latency and memory
+                    if (sourceBuffer.buffered.length > 0) {
+                        const start = sourceBuffer.buffered.start(0);
+                        const end = sourceBuffer.buffered.end(0);
+                        if (end - start > 10) {
+                            sourceBuffer.remove(0, end - 5);
+                        }
                     }
                 });
 
