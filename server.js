@@ -61,24 +61,26 @@ function startStreaming(ws) {
 
     console.log(`Starting FFmpeg MPEG-TS transcode on port ${UDP_PORT}`);
 
-    // Switching to MPEG-TS output (-f mpegts)
-    // MPEG-TS is much more resilient to corruption than MP4
-    // Scale to 480p for real-time speed (>1.0x) on low-spec servers
-    // Increase keyframe frequency (-g 15) to help recovery from corruption
-    // Use CRF 20 to maintain quality even with dirty input
+    // Dropped to 360p to ensure speed > 1.0x on the server
+    // Forced 4Mbps bitrate to prevent quality drops due to corruption
+    // Added -err_detect ignore_err to keep moving despite UDP drops
     ffmpegStreaming = spawn('ffmpeg', [
         '-analyzeduration', '10000000',
         '-probesize', '10000000',
         '-fflags', '+genpts+igndts',
-        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=10000000&buffer_size=10000000`,
+        '-err_detect', 'ignore_err',
+        '-i', `udp://0.0.0.0:${UDP_PORT}?fifo_size=20000000&buffer_size=20000000`,
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
-        '-vf', 'scale=trunc(oh*a/2)*2:480', // Force width to be divisible by 2 for H.264 encoder
-        '-crf', '20',         
-        '-g', '15',           
+        '-vf', 'scale=trunc(oh*a/2)*2:360', // Scale to 360p height
+        '-b:v', '4000k',       // Force 4Mbps bitrate
+        '-minrate', '4000k',
+        '-maxrate', '4000k',
+        '-bufsize', '8000k',
+        '-g', '15',           // Keyframe every 15 frames for fast recovery
         '-pix_fmt', 'yuv420p',
-        '-threads', '0',      
+        '-threads', '0',      // Use all available CPU cores
         '-c:a', 'aac',
         '-f', 'mpegts',
         'pipe:1'
